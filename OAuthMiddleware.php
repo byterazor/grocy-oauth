@@ -25,6 +25,12 @@ class OAuthMiddleware extends BaseAuthMiddleware
 		$this->client = new Client(['timeout' => 2.0]);
 	}
 
+	private static function oauth(string $name, string $default = ''): string
+	{
+		$value = getenv('GROCY_' . $name);
+		return $value !== false ? $value : $default;
+	}
+
 	public function AuthenticateRequest(Request $request)
 	{
 		define('GROCY_EXTERNALLY_MANAGED_AUTHENTICATION', true);
@@ -56,23 +62,21 @@ class OAuthMiddleware extends BaseAuthMiddleware
 		$code = $request->getQueryParam('code');
 		if ($code === null) {
 			http_response_code(302);
-			header('Location: ' . GROCY_OAUTH_AUTH_URL .
-				"?response_type=code" .
-				"&client_id=" . GROCY_OAUTH_CLIENT_ID .
-				"&redirect_uri=" . $request->getUri() .
-				"&scope=" . GROCY_OAUTH_SCOPES
-			);
+			header('Location: ' . self::oauth('OAUTH_AUTH_URL') . "?response_type=code"
+				. "&client_id=" . self::oauth('OAUTH_CLIENT_ID')
+				. "&redirect_uri=" . rawurlencode(self::oauth('OAUTH_REDIRECT_URI'))
+				. "&scope=" . self::oauth('OAUTH_SCOPES', 'openid profile'));
 			exit();
 		}
 
 		// 2. handle callback from auth server
 		// -> code parameter given to get token from auth server
-		$tokenResponse = $this->client->request('POST', GROCY_OAUTH_TOKEN_URL, [
-			RequestOptions::AUTH => [GROCY_OAUTH_CLIENT_ID, GROCY_OAUTH_CLIENT_SECRET],
+		$tokenResponse = $this->client->request('POST', self::oauth('OAUTH_TOKEN_URL'), [
+			RequestOptions::AUTH => [self::oauth('OAUTH_CLIENT_ID'), self::oauth('OAUTH_CLIENT_SECRET')],
 			RequestOptions::FORM_PARAMS => [
 				"grant_type" => "authorization_code",
 				"code" => $code,
-				"redirect_uri" => (string)$request->getUri(),
+				"redirect_uri" => self::oauth('OAUTH_REDIRECT_URI'),
 			],
 		]);
 		if ($tokenResponse->getStatusCode() != 200) {
@@ -81,7 +85,7 @@ class OAuthMiddleware extends BaseAuthMiddleware
 		$tokenResponseJson = json_decode($tokenResponse->getBody(), true);
 
 		// auth successful -> start collection user information
-		$infoResponse = $this->client->request('POST', GROCY_OAUTH_USERINFO_URL, [
+		$infoResponse = $this->client->request('POST', self::oauth('OAUTH_USERINFO_URL'), [
 			RequestOptions::HEADERS => [
 				"Authorization" => "Bearer " . $tokenResponseJson["access_token"]
 			],
@@ -93,9 +97,9 @@ class OAuthMiddleware extends BaseAuthMiddleware
 
 		// get user from database or create one if needed
 		$db = DatabaseService::getInstance()->GetDbConnection();
-		$user = $db->users()->where('username', $infoResponseJson[GROCY_OAUTH_USERNAME_CLAIM])->fetch();
+		$user = $db->users()->where('username', $infoResponseJson[self::oauth('OAUTH_USERNAME_CLAIM', 'preferred_username')])->fetch();
 		if ($user == null) {
-			$user = UsersService::getInstance()->CreateUser($infoResponseJson[GROCY_OAUTH_USERNAME_CLAIM], '', '', '');
+			$user = UsersService::getInstance()->CreateUser($infoResponseJson[self::oauth('OAUTH_USERNAME_CLAIM', 'preferred_username')], '', '', '');
 		}
 
 		$token = SessionService::GetInstance()->CreateToken(SessionService::SESSION_TOKEN_TYPE_ACCESS, $user->id, GetClientUserAgent());
