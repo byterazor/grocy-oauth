@@ -105,9 +105,9 @@ class OAuthMiddleware extends BaseAuthMiddleware
 		$token = SessionService::GetInstance()->CreateToken(SessionService::SESSION_TOKEN_TYPE_ACCESS, $user->id, GetClientUserAgent());
 		self::SetSessionCookie(SessionService::SESSION_TOKEN_TYPE_ACCESS, $token);
 
-		// last redirect to clean URL from OAuth parameters
+		// last redirect to clean URL from OAuth parameters (honor configured BASE_URL)
 		http_response_code(302);
-		header('Location: ' . $request->getUri()->getPath());
+		header('Location: ' . $this->AppContainer->get('UrlManager')->ConstructUrl('/'));
 		exit();
 	}
 
